@@ -2,13 +2,14 @@ name: Frontend lint
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, dots/browser-lifecycle-check-20261026]
   pull_request:
     branches: ["**"]
 
 jobs:
   frontend_lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,13 +19,22 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: yarn install --frozen-lockfile --ignore-scripts
       - name: ESLint
         run: yarn lint
       - name: TypeScript check
         run: yarn typecheck
       - name: Frontend tests
         run: yarn test
+      - name: Offline browser lifecycle checks (sandbox required)
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+          DEBUG: "pw:browser"
+        run: |
+          google-chrome --version
+          yarn test:browser
       - name: Portable packaging tests
         run: node --test .github/workflows/windows-portable/portable-archive.node-test.mjs
       - name: Staged Rust check regression tests
