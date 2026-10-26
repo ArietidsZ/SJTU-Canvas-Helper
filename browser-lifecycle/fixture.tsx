@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import PreviewModal from "../src/components/preview_modal";
 import RelationshipGraph from "../src/components/relationship_graph";
 import type { File } from "../src/lib/model";
+import type { DocRendererProps } from "@cyntler/react-doc-viewer";
+import PdfRenderer from "../src/components/pdf_renderer";
 import { boundary, pdfBytes } from "./boundaries";
+import { makePdfDataUri } from "./pdf-input";
 
 const blobs = { created: [] as string[], revoked: [] as string[] };
 const nativeCreate = URL.createObjectURL.bind(URL);
@@ -42,6 +45,7 @@ for (const method of ["render", "destroy", "changeSize"] as const) {
 type Mounted = { root: Root; host: HTMLDivElement; files: File[]; strict: boolean };
 const previews = new Map<string, Mounted>();
 let graphMount: { root: Root; host: HTMLDivElement; strict: boolean } | undefined;
+let pdfMount: { root: Root; host: HTMLDivElement } | undefined;
 function makeRoot(id: string) {
   const host = document.createElement("div");
   host.id = id;
@@ -97,6 +101,28 @@ const api = {
     previews.delete(id);
   },
   releaseCaller(url: string) { nativeRevoke(url); },
+  mountPdf() {
+    if (pdfMount) throw new Error("PDF already mounted");
+    pdfMount = makeRoot("pdf-renderer");
+    pdfMount.host.style.height = "640px";
+    const fileData = makePdfDataUri();
+    // Only the input shape is provided here. This directly mounts the production
+    // renderer and its real React-PDF Document/Page, PDF.js worker and canvases.
+    const props = { mainState: { currentDocument: {
+      uri: fileData, fileData, fileName: "forty-vector-pages.pdf", fileType: "pdf",
+    } } } as DocRendererProps;
+    pdfMount.root.render(<PdfRenderer {...props} />);
+  },
+  resizePdf(width: number) {
+    if (!pdfMount) throw new Error("No PDF mounted");
+    pdfMount.host.style.width = `${width}px`;
+  },
+  unmountPdf() {
+    if (!pdfMount) throw new Error("No PDF mounted");
+    pdfMount.root.unmount();
+    pdfMount.host.remove();
+    pdfMount = undefined;
+  },
   mountGraph(strict = false) {
     if (graphMount) throw new Error("Graph already mounted");
     graphMount = { ...makeRoot("graph"), strict };

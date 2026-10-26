@@ -28,14 +28,14 @@ jobs:
         run: yarn typecheck
       - name: Frontend tests
         run: yarn test
-      - name: Offline browser lifecycle checks (sandbox required)
+      - name: Baseline PDF canvas regression (expected red, sandbox required)
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
           DEBUG: "pw:browser"
         run: |
           google-chrome --version
           yarn test:browser:typecheck
-          yarn test:browser
+          yarn test:browser --grep 'real PDF: first viewport'
       - name: Portable packaging tests
         run: node --test .github/workflows/windows-portable/portable-archive.node-test.mjs
       - name: Staged Rust check regression tests

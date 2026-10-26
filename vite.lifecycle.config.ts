@@ -9,8 +9,9 @@ export default defineConfig({
   // Do not scan the production app/website with the fixture-only aliases.
   optimizeDeps: { entries: ["browser-lifecycle/index.html"] },
   server: { host: "127.0.0.1", port: 4179, strictPort: true, open: false },
-  // Only these two production components are loaded. Native IPC/data and the
-  // document viewer are explicit test boundaries; Blob and G6 are never aliased.
+  // Three production components are loaded directly. Native IPC/data and the
+  // full document-viewer app are explicit boundaries; Blob, G6, PdfRenderer,
+  // React-PDF Document/Page, PDF.js and its worker are never aliased.
   resolve: {
     alias: [
       { find: "@tauri-apps/api/core", replacement: boundaries },

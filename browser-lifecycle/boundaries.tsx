@@ -31,6 +31,17 @@ export function useRelationship() { return boundary.relationship; }
 export async function getFileType() { return "pdf"; }
 export const BasicRenderers = [];
 
+// Pure input decoding only, matching the production helpers. The existing utils
+// alias excludes native/config side effects; it does not replace PDF rendering.
+export function getBase64Data(raw?: string) {
+  if (!raw) return "";
+  return raw.startsWith("data:") && raw.includes(",") ? raw.split(",")[1] : raw;
+}
+export function base64ToBuffer(base64: string) {
+  const binary = atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 // This is deliberately NOT a PDF-rendering/UI acceptance test. Only the real
 // PreviewModal's URL ownership is under test; the native browser fetches bytes.
 export default function DocumentBoundary({ documents }: { documents: { uri: string }[] }) {
