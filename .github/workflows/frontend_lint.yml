@@ -34,6 +34,7 @@ jobs:
           DEBUG: "pw:browser"
         run: |
           google-chrome --version
+          yarn test:browser:typecheck
           yarn test:browser
       - name: Portable packaging tests
         run: node --test .github/workflows/windows-portable/portable-archive.node-test.mjs
