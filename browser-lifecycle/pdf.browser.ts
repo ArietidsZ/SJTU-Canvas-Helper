@@ -104,6 +104,17 @@ test("real PDF: scrolling to the last page paints it and releases distant canvas
   await expect(pageCanvas(page, PDF_PAGE_COUNT)).toBeInViewport();
   await expectBoundedCanvases(page, "scrolled to last page");
   await expect(pageCanvas(page, 1)).toHaveCount(0);
+  const lastPageWidth = await pageCanvas(page, PDF_PAGE_COUNT).evaluate((canvas) => (canvas as HTMLCanvasElement).width);
+  await page.getByRole("button", { name: "放大", exact: true }).click();
+  // The zoom status is above the scrolled viewport; require the updated text,
+  // not visibility of that status. The actual last-page canvas must stay visible.
+  await expect(page.getByText("缩放 110%", { exact: true })).toHaveCount(1);
+  await expect.poll(() => pageCanvas(page, PDF_PAGE_COUNT).evaluateAll((elements) =>
+    (elements[0] as HTMLCanvasElement | undefined)?.width ?? 0,
+  )).toBeGreaterThan(lastPageWidth);
+  await expectPaintedPage(page, PDF_PAGE_COUNT);
+  await expect(pageCanvas(page, PDF_PAGE_COUNT)).toBeInViewport();
+  await expectBoundedCanvases(page, "last page after zoom 110%");
   await scrollPdf(page, "start");
   await expectPaintedPage(page, 1);
   await expect(pageCanvas(page, 1)).toBeInViewport();
