@@ -80,7 +80,27 @@ export class TaskManager {
   enqueue(spec: TaskSpec): string {
     const existing = this.tasks.find((task) => task.id === spec.id);
     if (existing) {
-      if (existing.status === "failed") this.retry(existing.id);
+      if (existing.status === "failed" && !this.executing.has(existing.id)) {
+        const previous = this.specs.get(existing.id);
+        this.specs.set(existing.id, spec);
+        // Explicit resubmission replaces the operation; retry(id) retains it.
+        this.patch(existing.id, {
+          name: spec.name, kind: spec.kind, source: spec.source,
+          context: spec.context, outputPath: spec.outputPath,
+          outputDirectory: spec.outputDirectory, data: spec.data,
+          canOpen: !!spec.open, canSave: !!spec.save, result: undefined,
+          unreadCompletion: false, status: "queued", stage: "等待重试",
+          progress: undefined, error: undefined, actionError: undefined,
+          finishedAt: undefined, log: undefined,
+        });
+        // Commit replacement first so disposal callbacks cannot restart the old spec.
+        try {
+          if (previous !== spec && previous?.dispose !== spec.dispose) previous?.dispose?.();
+        } catch (error) {
+          this.patch(existing.id, { actionError: `Previous task cleanup failed: ${String(error)}` });
+        }
+        this.drain();
+      }
       return existing.id;
     }
     this.specs.set(spec.id, spec);
@@ -158,17 +178,22 @@ export class TaskManager {
     } finally { this.draining = false; }
   }
   private async execute(task: Task, spec: TaskSpec) {
+    let active = true;
+    const ownsExecution = () => active && this.specs.get(task.id) === spec && this.executing.has(task.id);
     this.patch(task.id, { status: "running", stage: spec.stage ?? "正在处理", attempt: task.attempt + 1 });
     try {
       await spec.run({
-        update: (patch) => this.patch(task.id, patch),
-        setOpen: (action) => { spec.open = action; this.patch(task.id, { canOpen: true }); },
-        setSave: (action) => { spec.save = action; this.patch(task.id, { canSave: true }); },
+        update: (patch) => { if (ownsExecution()) this.patch(task.id, patch); },
+        setOpen: (action) => { if (ownsExecution()) { spec.open = action; this.patch(task.id, { canOpen: true }); } },
+        setSave: (action) => { if (ownsExecution()) { spec.save = action; this.patch(task.id, { canSave: true }); } },
       });
+      active = false;
       this.patch(task.id, { status: "succeeded", stage: "已完成", progress: 100, finishedAt: Date.now(), unreadCompletion: true });
     } catch (error) {
+      active = false;
       this.patch(task.id, { status: "failed", stage: "执行失败", error: String(error), finishedAt: Date.now() });
     } finally {
+      active = false;
       this.executing.delete(task.id);
       this.drain();
     }
