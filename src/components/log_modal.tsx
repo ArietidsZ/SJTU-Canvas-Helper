@@ -15,7 +15,7 @@ export default function LogModal({ onClose }: { onClose: () => void }) {
         const value = (await invoke("read_log_content")) as string;
         setLog(value);
       } catch (e) {
-        consoleLog(LOG_LEVEL_ERROR, e);
+        consoleLog(LOG_LEVEL_ERROR, "Log content loading failed");
       }
     };
     void init();
