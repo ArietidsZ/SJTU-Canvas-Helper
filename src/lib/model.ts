@@ -292,12 +292,14 @@ export interface LlmApiKeyEntry {
 }
 
 export interface AppConfig {
+    __config_owner?: string;
     token: string;
     account_type: "Default" | "JI";
     save_path: string;
     serve_as_plaintext: string;
     oauth_consumer_key: string;
     ja_auth_cookie: string;
+    jbox_login_info?: { library_id: string; space_id: string; access_token: string };
     video_cookies: string;
     proxy_port: number;
     course_assignment_file_bindings: Record<number, File[]>;
@@ -541,6 +543,14 @@ export interface GradeStatus {
 export interface QRCodeScanResult {
     file: File,
     contents: string[];
+}
+
+export interface QRCodeScanReport {
+    results: QRCodeScanResult[];
+    total_files: number;
+    image_files: number;
+    scanned_images: number;
+    failed_images: number;
 }
 
 export interface DiscussionTopic {
