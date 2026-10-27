@@ -40,3 +40,15 @@ jobs:
         run: node --test .github/workflows/windows-portable/portable-archive.node-test.mjs
       - name: Staged Rust check regression tests
         run: node --test script/check-rust.node-test.mjs
+      - name: Record screenshot provenance
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import cp from "node:child_process"; const blob=cp.execFileSync("git",["rev-parse","HEAD:src/components/pdf_renderer.tsx"],{encoding:"utf8"}).trim(); fs.writeFileSync("test-results/provenance.json", JSON.stringify({capture_commit:process.env.GITHUB_SHA,run_url:"https://github.com/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,scope:"Synthetic 40-page PDF in real Chromium/PDF.js fixture; not macOS/Tauri or authenticated Canvas",renderer_blob:blob},null,2));'
+      - name: Upload generated PDF review screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-review-screenshots
+          path: |
+            test-results/**/*.png
+            test-results/provenance.json
+          if-no-files-found: error
+          retention-days: 14

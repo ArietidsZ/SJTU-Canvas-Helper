@@ -48,6 +48,11 @@ async function expectBoundedCanvases(page: Page, stage: string) {
   const count = (await rasterSnapshot(page, stage)).canvases.length;
   expect(count, `Only nearby PDF pages should own canvases (document has ${PDF_PAGE_COUNT} pages)`).toBeLessThanOrEqual(maxCanvases);
   expect(count).toBeGreaterThan(0);
+  // Capture the real fixture only after its existing raster/window assertions.
+  // Full viewport avoids locator screenshot auto-scrolling the document.
+  const imagePath = test.info().outputPath(stage.replace(/[^a-z0-9]+/gi, "-") + ".png");
+  await page.screenshot({ path: imagePath, fullPage: false });
+  await test.info().attach(stage, { path: imagePath, contentType: "image/png" });
 }
 
 async function mountPdf(page: Page) {
