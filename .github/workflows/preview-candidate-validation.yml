@@ -1,0 +1,41 @@
+name: Preview merge candidate validation
+on:
+  push:
+    branches: [validation/preview-session-20261030]
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Use pinned Yarn
+        run: |
+          corepack prepare yarn@1.22.22 --activate
+          test "$(corepack yarn --version)" = "1.22.22"
+      - name: Install locked dependencies without scripts
+        id: install
+        run: corepack yarn install --frozen-lockfile --ignore-scripts --non-interactive
+      - name: Verify locked inputs unchanged
+        run: git diff --exit-code -- package.json yarn.lock
+      - name: Preview lifetime regressions
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: corepack yarn test src/components/__tests__/preview_modal.test.tsx src/components/__tests__/preview_modal_lifetime.test.tsx
+      - name: Frontend tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: corepack yarn test
+      - name: TypeScript
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: corepack yarn typecheck
+      - name: ESLint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: corepack yarn lint
+      - name: Production build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: corepack yarn build
