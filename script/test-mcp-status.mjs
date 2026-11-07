@@ -150,7 +150,7 @@ test("source wiring updates saved config only on initialization or accepted save
   assert.match(settings, /if \(isConfigOwnerCurrent\(saved\)\) setSavedConfig\(saved\)/);
   assert.match(settings, /<McpStatusPanel savedConfig=\{savedConfig\} \/>/);
   assert.match(settings, /return mcpConnectionGuide\(formData\.mcp_port\)/);
-  assert.match(settings, /writeText\(mcpConnectionText\)/);
+  assert.match(settings, /copyMcpText\(mcpConnectionText\)/);
   const bytes = readFileSync(new URL("../src/page/settings.tsx", import.meta.url));
   assert.equal(bytes.toString().replaceAll("\r\n", "").includes("\n"), false, "Preserve original settings CRLF");
 });

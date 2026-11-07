@@ -322,7 +322,7 @@ it("retains MCP settings, raw config preview and diagnostic tools", async () => 
   const connectionText = (screen.getByLabelText("MCP 连接配置") as HTMLTextAreaElement).value;
   expect(connectionText).toContain('"type": "remote"');
   expect(connectionText).toContain("http://127.0.0.1:3200/mcp");
-  fireEvent.click(screen.getByRole("button", { name: "复制配置" }));
+  fireEvent.click(screen.getByRole("button", { name: "复制说明" }));
   expect(mocks.writeClipboard).toHaveBeenCalledWith(connectionText);
   fireEvent.click(screen.getByRole("switch", { name: "启用 Debug 模式" })); save();
   await waitFor(() => expect(mocks.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ mcp_enabled: true, mcp_port: 3200, debug_mode: true })));
@@ -868,4 +868,58 @@ it.each(["resolve", "reject"])("drops an MCP %s after unmount without showing er
   expect(mocks.invoke.mock.calls).toHaveLength(calls);
   expect(mocks.message.error).not.toHaveBeenCalled();
   expect(mocks.message.warning).not.toHaveBeenCalled();
+});
+
+it.each(["复制 URL", "复制 OpenCode JSON", "复制通用 JSON"])("MCP clipboard %s contains only the selected payload from the latest draft", async label => {
+  await openSettings(); section("高级与实验");
+  fireEvent.click(screen.getByRole("switch", { name: "启用 MCP Server" }));
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "4310" } });
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  await waitFor(() => expect(mocks.message.success).toHaveBeenCalledWith("已复制！"));
+  const text = mocks.writeClipboard.mock.calls[0][0];
+  const url = "http://127.0.0.1:4310/mcp";
+  if (label === "复制 URL") expect(text).toBe(url);
+  else expect(JSON.parse(text)).toEqual(label === "复制 OpenCode JSON"
+    ? { mcp: { "sjtu-canvas": { type: "remote", url, enabled: true } } }
+    : { mcpServers: { "sjtu-canvas": { url } } });
+  expect(text).not.toContain(config.token);
+  expect(mocks.saveConfig).not.toHaveBeenCalled();
+  expect(screen.getByText("修改尚未保存")).toBeVisible();
+  expect(screen.getByText(/以下连接说明按当前表单端口生成，不代表服务已启动或设置已保存/)).toBeVisible();
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "4311" } });
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  expect(mocks.writeClipboard.mock.calls[1][0]).toContain("http://127.0.0.1:4311/mcp");
+  expect(mocks.writeClipboard.mock.calls[1][0]).not.toContain(":4310/");
+});
+
+it("MCP clipboard disables connection payloads until a token is configured", async () => {
+  await openSettings();
+  fireEvent.change(screen.getByLabelText("Canvas Token"), { target: { value: "" } });
+  section("高级与实验");
+  for (const label of ["复制 URL", "复制 OpenCode JSON", "复制通用 JSON", "复制说明"]) {
+    expect(screen.getByRole("button", { name: label })).toBeDisabled();
+  }
+  expect(mocks.writeClipboard).not.toHaveBeenCalled();
+});
+
+it.each(["reject", "unavailable"])("MCP clipboard handles %s without leaking a raw error and can retry", async outcome => {
+  await openSettings(); section("高级与实验");
+  if (outcome === "reject") mocks.writeClipboard.mockRejectedValueOnce(new Error("PRIVATE_CLIPBOARD_ERROR"));
+  else Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+  fireEvent.click(screen.getByRole("button", { name: "复制 OpenCode JSON" }));
+  await waitFor(() => expect(mocks.message.error).toHaveBeenCalledWith("复制失败，请手动选择下方内容复制"));
+  expect(mocks.message.success).not.toHaveBeenCalled();
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: mocks.writeClipboard }, configurable: true });
+  fireEvent.click(screen.getByRole("button", { name: "复制 OpenCode JSON" }));
+  await waitFor(() => expect(mocks.message.success).toHaveBeenCalledWith("已复制！"));
+  expect(mocks.saveConfig).not.toHaveBeenCalled();
+});
+
+it("MCP clipboard disables payloads for an invalid stored port", async () => {
+  config.mcp_port = 65536;
+  await openSettings(); section("高级与实验");
+  for (const label of ["复制 URL", "复制 OpenCode JSON", "复制通用 JSON"]) {
+    expect(screen.getByRole("button", { name: label })).toBeDisabled();
+  }
+  expect(mocks.writeClipboard).not.toHaveBeenCalled();
 });

@@ -61,7 +61,7 @@ import {
   normalizeLlmConfigForSettings,
 } from "../lib/llm_config";
 import { useAppMessage } from "../lib/message";
-import { mcpConnectionGuide } from "../lib/mcp_connection";
+import { mcpClientConfig, mcpConnectionGuide, mcpEndpoint } from "../lib/mcp_connection";
 import { AccountInfo, AppConfig, User } from "../lib/model";
 import { currentSession, invalidateSession, isSessionCurrent, subscribeSession } from "../lib/session";
 import { savePathValidator } from "../lib/utils";
@@ -387,6 +387,17 @@ export default function SettingsPage() {
     if (!formData?.token) return "// 请先配置 Canvas Token 并保存";
     return mcpConnectionGuide(formData.mcp_port);
   }, [formData?.token, formData?.mcp_port]);
+
+  const mcpUrl = formData ? mcpEndpoint(formData.mcp_port) : null;
+  const copyMcpText = async (text: string | null) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      messageApi.success("已复制！");
+    } catch {
+      messageApi.error("复制失败，请手动选择下方内容复制");
+    }
+  };
 
   const parsedRawConfig = useMemo(() => {
     if (!rawConfig) {
@@ -1862,15 +1873,24 @@ export default function SettingsPage() {
                         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
                           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>MCP 连接配置</Typography>
                           <Button size="small" startIcon={<ContentCopyRoundedIcon />} disabled={!formData?.token}
-                            onClick={() => {
-                              navigator.clipboard.writeText(mcpConnectionText).then(
-                                () => messageApi.success("已复制！"),
-                                () => messageApi.error("复制失败")
-                              );
-                            }}>复制配置</Button>
+                            onClick={() => void copyMcpText(mcpConnectionText)}>复制说明</Button>
                         </Stack>
                         <Typography variant="caption" color="text.secondary">
                           以下连接说明按当前表单端口生成，不代表服务已启动或设置已保存。客户端需支持 Streamable HTTP，并按其配置格式手动接入。本机监听不是身份鉴权，同机其他进程也可能访问 Canvas 数据；仅供可信本机环境使用，请勿通过代理公开。
+                        </Typography>
+                        <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1}>
+                          <Button size="small" variant="outlined" startIcon={<LinkRoundedIcon />}
+                            disabled={!formData?.token || !mcpUrl}
+                            onClick={() => void copyMcpText(mcpUrl)}>复制 URL</Button>
+                          <Button size="small" variant="outlined" startIcon={<ContentCopyRoundedIcon />}
+                            disabled={!formData?.token || !mcpUrl}
+                            onClick={() => void copyMcpText(mcpClientConfig(formData?.mcp_port ?? 0, "opencode"))}>复制 OpenCode JSON</Button>
+                          <Button size="small" variant="outlined" startIcon={<ContentCopyRoundedIcon />}
+                            disabled={!formData?.token || !mcpUrl}
+                            onClick={() => void copyMcpText(mcpClientConfig(formData?.mcp_port ?? 0, "generic"))}>复制通用 JSON</Button>
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          URL 可直接填入客户端；JSON 按对应格式合并到现有配置，请勿覆盖其他服务器。复制说明包含完整指引，不是可直接粘贴的 JSON。
                         </Typography>
                         <TextField size="small"
                           label="MCP 连接配置"

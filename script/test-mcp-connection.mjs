@@ -5,7 +5,7 @@ import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 
 const source = readFileSync(new URL("../src/lib/mcp_connection.ts", import.meta.url), "utf8");
-const { mcpEndpoint, mcpConnectionGuide } = await import(
+const { mcpEndpoint, mcpConnectionGuide, mcpClientConfig } = await import(
   `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`
 );
 const settings = readFileSync(new URL("../src/page/settings.tsx", import.meta.url), "utf8");
@@ -48,6 +48,26 @@ test("connection guide avoids legacy transport and unimplemented CLI claims", ()
 
 test("settings display and clipboard use the same pure guide result", () => {
   assert.match(settings, /return mcpConnectionGuide\(formData\.mcp_port\);/);
-  assert.match(settings, /writeText\(mcpConnectionText\)/);
+  assert.match(settings, /copyMcpText\(mcpConnectionText\)/);
   assert.match(settings, /value=\{mcpConnectionText\}/);
+});
+
+test("clipboard client configurations are standalone JSON and match the guide", () => {
+  for (const port of [1, 3100, 4310, 65535]) {
+    const url = mcpEndpoint(port);
+    const generic = mcpClientConfig(port, "generic");
+    const opencode = mcpClientConfig(port, "opencode");
+    assert.deepEqual(JSON.parse(generic), { mcpServers: { "sjtu-canvas": { url } } });
+    assert.deepEqual(JSON.parse(opencode), { mcp: { "sjtu-canvas": { type: "remote", url, enabled: true } } });
+    assert.ok(mcpConnectionGuide(port).includes(generic));
+    assert.ok(mcpConnectionGuide(port).includes(opencode));
+  }
+});
+
+test("clipboard configurations reject invalid ports and unknown client formats", () => {
+  for (const port of [0, -1, 65536, 3.14, NaN, Infinity, -Infinity, null, "3100"]) {
+    assert.equal(mcpClientConfig(port, "generic"), null);
+    assert.equal(mcpClientConfig(port, "opencode"), null);
+  }
+  assert.equal(mcpClientConfig(3100, "unsupported"), null);
 });

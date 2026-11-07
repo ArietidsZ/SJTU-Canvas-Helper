@@ -4,6 +4,20 @@ export function mcpEndpoint(port = 3100): string | null {
   return `http://127.0.0.1:${port}/mcp`;
 }
 
+/** Paste-ready JSON only. Never includes account credentials or explanatory text. */
+export function mcpClientConfig(port: number, client: "generic" | "opencode"): string | null {
+  const url = mcpEndpoint(port);
+  if (!url) return null;
+  switch (client) {
+    case "generic":
+      return JSON.stringify({ mcpServers: { "sjtu-canvas": { url } } }, null, 2);
+    case "opencode":
+      return JSON.stringify({ mcp: { "sjtu-canvas": { type: "remote", url, enabled: true } } }, null, 2);
+    default:
+      return null;
+  }
+}
+
 /** One source for the displayed guide and clipboard contents. */
 export function mcpConnectionGuide(port = 3100): string {
   const url = mcpEndpoint(port);
@@ -14,10 +28,10 @@ export function mcpConnectionGuide(port = 3100): string {
     "以下地址按设置端口生成，不代表服务已启动或连接已验证。",
     `通用连接 URL：${url}`,
     "通用 URL 配置片段，需按客户端支持的格式调整：",
-    JSON.stringify({ mcpServers: { "sjtu-canvas": { url } } }, null, 2),
+    mcpClientConfig(port, "generic"),
     "",
     "OpenCode 配置片段（合并到现有配置的 mcp 字段）：",
-    JSON.stringify({ mcp: { "sjtu-canvas": { type: "remote", url, enabled: true } } }, null, 2),
+    mcpClientConfig(port, "opencode"),
     "",
     "客户端需支持 Streamable HTTP；仅粘贴说明不会自动建立连接。",
     "连接后可调用 list_courses 查看课程，再查询作业截止时间。",
