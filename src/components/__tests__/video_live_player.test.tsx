@@ -103,6 +103,69 @@ describe("live player lifecycle", () => {
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "get_video_live_info")).toHaveLength(2);
     expect(screen.queryByText(/直播连接中断/)).not.toBeInTheDocument();
   });
+  it("ignores an earlier play rejection after a newer request is playing", async () => {
+    let rejectEarlier!: (reason: unknown) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectEarlier = reject; }));
+    render(<VideoLivePlayer {...props} />);
+    await screen.findByRole("combobox", { name: "直播机位" });
+    const video = screen.getByLabelText("课堂直播播放器");
+    fireEvent.canPlay(video);
+    fireEvent.click(screen.getByRole("button", { name: "回到直播" }));
+    fireEvent.playing(video);
+    await act(async () => { rejectEarlier(new DOMException("Earlier autoplay was blocked", "NotAllowedError")); });
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a previous camera's play rejection after switching camera", async () => {
+    let rejectEarlier!: (reason: unknown) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectEarlier = reject; }));
+    render(<VideoLivePlayer {...props} />);
+    await screen.findByRole("combobox", { name: "直播机位" });
+    const video = screen.getByLabelText("课堂直播播放器");
+    fireEvent.canPlay(video);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "直播机位" }));
+    fireEvent.click(screen.getByRole("option", { name: "课件" }));
+    expect(mocks.instances[0].destroy).toHaveBeenCalledOnce();
+    await act(async () => { rejectEarlier(new DOMException("Previous camera autoplay was blocked", "NotAllowedError")); });
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "正在连接直播" })).toBeVisible();
+    fireEvent.canPlay(video);
+    fireEvent.playing(video);
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer to resume a source already released by a fatal HLS error", async () => {
+    let rejectEarlier!: (reason: unknown) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectEarlier = reject; }));
+    render(<VideoLivePlayer {...props} />);
+    await screen.findByRole("combobox", { name: "直播机位" });
+    fireEvent.canPlay(screen.getByLabelText("课堂直播播放器"));
+    act(() => mocks.instances[0].onError?.("error", { fatal: true }));
+    await act(async () => { rejectEarlier(new DOMException("Released source playback was blocked", "NotAllowedError")); });
+    expect(screen.getByText(/直播连接中断/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新连接" })).toBeEnabled();
+  });
+
+  it("still offers resume when the current play request is blocked", async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new DOMException("Autoplay was blocked", "NotAllowedError"));
+    render(<VideoLivePlayer {...props} />);
+    await screen.findByRole("combobox", { name: "直播机位" });
+    const video = screen.getByLabelText("课堂直播播放器");
+    await act(async () => { fireEvent.canPlay(video); });
+    fireEvent.click(screen.getByRole("button", { name: "继续播放" }));
+    fireEvent.playing(video);
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+  });
+
+  it("ignores an interrupted current play request without a resume prompt", async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new DOMException("Playback interrupted", "AbortError"));
+    render(<VideoLivePlayer {...props} />);
+    await screen.findByRole("combobox", { name: "直播机位" });
+    await act(async () => { fireEvent.canPlay(screen.getByLabelText("课堂直播播放器")); });
+    expect(screen.queryByRole("button", { name: "继续播放" })).not.toBeInTheDocument();
+  });
+
   it("ends on the service deadline even when the camera changes", async () => {
     vi.useFakeTimers();
     await act(async () => { render(<VideoLivePlayer {...props} />); });

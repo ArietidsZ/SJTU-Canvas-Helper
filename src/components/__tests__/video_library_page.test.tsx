@@ -125,7 +125,8 @@ describe("video library workflows", () => {
     expect(screen.getByTestId("chat")).not.toHaveTextContent("video-topics");
     await waitFor(() => expect(screen.getAllByText(/语法分析/).some((item) => item.closest("td"))).toBe(true));
     await waitFor(() => expect(screen.getAllByText(/项目集构造/).some((item) => item.closest("td"))).toBe(true));
-    expect(screen.getByRole("columnheader", { name: "课堂主题" })).toBeVisible();
+    // The summary dialog restores the table to the accessibility tree after its exit transition.
+    expect(await screen.findByRole("columnheader", { name: "课堂主题" })).toBeVisible();
   });
 
   it("offers a retry rather than claiming subtitles are absent when inspection fails", async () => {

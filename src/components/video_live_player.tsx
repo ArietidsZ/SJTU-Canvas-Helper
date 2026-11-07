@@ -20,6 +20,7 @@ export default function VideoLivePlayer({ session, nextSession, canvasCourseId, 
   const releaseSource = useRef<() => void>();
   const selectedCamera = useRef("");
   const wantsPlayback = useRef(true);
+  const playAttempt = useRef(0);
   const sourceChanging = useRef(false);
   const restorePip = useRef(false);
   const pipAttempted = useRef(false);
@@ -148,6 +149,8 @@ export default function VideoLivePlayer({ session, nextSession, canvasCourseId, 
     function release() {
       if (released) return;
       released = true;
+      // A pending play() belongs to the released source, not its replacement.
+      playAttempt.current += 1;
       rememberPip(video);
       hls?.destroy(); hlsRef.current = undefined;
       video.pause(); video.removeAttribute("src"); video.load();
@@ -179,9 +182,10 @@ export default function VideoLivePlayer({ session, nextSession, canvasCourseId, 
   const play = () => {
     const element = media.current;
     if (!element) return;
+    const attempt = ++playAttempt.current;
     void element.play().catch((error: unknown) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      if (mounted.current && wantsPlayback.current && activeSession.current === source?.sessionId) {
+      if (attempt === playAttempt.current && mounted.current && wantsPlayback.current && activeSession.current === source?.sessionId) {
         setNeedsPlay(true); setLoading(false);
       }
     });
