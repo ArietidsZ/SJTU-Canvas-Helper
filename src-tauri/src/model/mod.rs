@@ -2,6 +2,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 mod video_summary;
 pub use video_summary::*;
+mod subtitle_proofread;
+pub use subtitle_proofread::*;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Course {
@@ -20,8 +22,16 @@ pub struct Course {
     pub teachers: Vec<Teacher>,
     #[serde(default)]
     pub term: Term,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_syllabus_body")]
     pub syllabus_body: String,
+}
+
+// Canvas uses null as well as an omitted/empty string for an unpublished syllabus.
+fn deserialize_syllabus_body<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,6 +79,29 @@ pub struct File {
     pub content_type: String,
     #[serde(default)]
     pub preview_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_type: Option<String>,
+}
+
+/// A pending file and the folder path used by the same sync completeness check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingCourseFile {
+    pub file: File,
+    // Some("") is the course root. None means no valid folder path was resolved;
+    // serialize it as null so callers cannot mistake a missing path for root.
+    pub folder_path: Option<String>,
+}
+
+impl File {
+    pub fn expected_download_size(&self) -> Option<u64> {
+        // The frontend's external-link adapter uses size=0 for unknown length.
+        // A Canvas API file with size=0 is instead an explicitly empty file.
+        if self.size == 0 && self.external_type.as_deref() == Some("File") {
+            None
+        } else {
+            Some(self.size)
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,7 +172,7 @@ pub enum Theme {
     Dark,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmApiKeyEntry {
     pub name: String,
     pub key: String,
@@ -149,7 +182,7 @@ pub struct LlmApiKeyEntry {
     pub model: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub token: String,
@@ -200,6 +233,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub experimental_ppt_cleanup: bool,
     #[serde(default)]
+    pub experimental_video_topics: bool,
+    #[serde(default)]
     pub color_primary: Option<String>,
     #[serde(default)]
     pub mcp_enabled: bool,
@@ -235,6 +270,7 @@ impl Default for AppConfig {
             compact_mode: Default::default(),
             experimental_task_center_only: false,
             experimental_ppt_cleanup: false,
+            experimental_video_topics: false,
             color_primary: Default::default(),
             mcp_enabled: Default::default(),
             mcp_port: 3100,
@@ -633,7 +669,7 @@ pub struct PersonalSpaceInfo {
     pub message: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JBoxLoginInfo {
     #[serde(default)]
     pub library_id: String,
@@ -805,6 +841,15 @@ pub struct SubmissionUploadErrorResponse {
 pub struct QRCodeScanResult {
     pub file: File,
     pub contents: Vec<String>,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct QRCodeScanReport {
+    pub results: Vec<QRCodeScanResult>,
+    pub total_files: usize,
+    pub image_files: usize,
+    pub scanned_images: usize,
+    pub failed_images: usize,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1145,10 +1190,16 @@ pub struct AnnualReport {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasVideoSubTitleResponseBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_subtitles")]
     pub after_assembly_list: Vec<CanvasVideoSubTitle>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_subtitles")]
     pub before_assembly_list: Vec<CanvasVideoSubTitle>,
+}
+
+fn deserialize_nullable_subtitles<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<CanvasVideoSubTitle>, D::Error> {
+    Ok(Option::<Vec<CanvasVideoSubTitle>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1290,4 +1341,31 @@ pub struct NetworkRequestLog {
     pub response_body: Option<String>,
     pub response_body_truncated: bool,
     pub error: Option<String>,
+}
+
+impl std::fmt::Debug for LlmApiKeyEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmApiKeyEntry")
+            .field("key_configured", &!self.key.is_empty())
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("account_type", &self.account_type)
+            .field("token_configured", &!self.token.is_empty())
+            .field("llm_key_count", &self.llm_api_keys.len())
+            .field("debug_mode", &self.debug_mode)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for JBoxLoginInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JBoxLoginInfo")
+            .field("access_token_configured", &!self.access_token.is_empty())
+            .finish_non_exhaustive()
+    }
 }

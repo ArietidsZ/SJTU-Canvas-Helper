@@ -19,19 +19,19 @@ SJTU Canvas 小帮手基于 [Tauri](https://tauri.app/) 开发，助您更便捷
 
 | 操作系统类型 | 推荐下载（点击直接下载最新版） | 说明 |
 | :--- | :--- | :--- |
-| 🪟 **Windows 64 位** | [SJTU.Canvas.Helper_3.0.13_x64_en-US.msi](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_3.0.13_x64_en-US.msi) | 首选，支持自动更新 |
-| 🪟 **Windows 32 位** | [SJTU.Canvas.Helper_3.0.13_x86_en-US.msi](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_3.0.13_x86_en-US.msi) | 仅限老旧 32 位电脑 |
-| 🍎 **macOS Apple Silicon** | [SJTU.Canvas.Helper_3.0.13_aarch64.dmg](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_3.0.13_aarch64.dmg) | M 系列芯片 |
-| 🍎 **macOS Intel** | [SJTU.Canvas.Helper_x64.app.tar.gz](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_x64.app.tar.gz) | Intel 芯片 |
-| 🐧 **Linux Debian/Ubuntu** | [SJTU.Canvas.Helper_3.0.13_amd64.deb](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_3.0.13_amd64.deb) | `dpkg` 安装 |
-| 🐧 **Linux RedHat/Fedora** | [SJTU.Canvas.Helper-3.0.13-1.x86_64.rpm](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper-3.0.13-1.x86_64.rpm) | `rpm` 安装 |
-| 🐧 **Linux 通用** | [SJTU.Canvas.Helper_3.0.13_amd64.AppImage](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.13/SJTU.Canvas.Helper_3.0.13_amd64.AppImage) | 赋予权限后直接运行 |
+| 🪟 **Windows 64 位** | [SJTU.Canvas.Helper_3.0.14_x64_en-US.msi](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_3.0.14_x64_en-US.msi) | 首选，支持自动更新 |
+| 🪟 **Windows 32 位** | [SJTU.Canvas.Helper_3.0.14_x86_en-US.msi](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_3.0.14_x86_en-US.msi) | 仅限老旧 32 位电脑 |
+| 🍎 **macOS Apple Silicon** | [SJTU.Canvas.Helper_3.0.14_aarch64.dmg](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_3.0.14_aarch64.dmg) | M 系列芯片 |
+| 🍎 **macOS Intel** | [SJTU.Canvas.Helper_x64.app.tar.gz](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_x64.app.tar.gz) | Intel 芯片 |
+| 🐧 **Linux Debian/Ubuntu** | [SJTU.Canvas.Helper_3.0.14_amd64.deb](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_3.0.14_amd64.deb) | `dpkg` 安装 |
+| 🐧 **Linux RedHat/Fedora** | [SJTU.Canvas.Helper-3.0.14-1.x86_64.rpm](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper-3.0.14-1.x86_64.rpm) | `rpm` 安装 |
+| 🐧 **Linux 通用** | [SJTU.Canvas.Helper_3.0.14_amd64.AppImage](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases/download/app-v3.0.14/SJTU.Canvas.Helper_3.0.14_amd64.AppImage) | 赋予权限后直接运行 |
 
 1. 前往 [Release](https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/releases) 页面下载并安装一次即可，后续主版本更新将自动拉取，无需重复下载
 
 2. **Windows 系统**：
    - 推荐下载 `.msi` 安装包，支持自动更新功能
-   - 也可选择免安装便携版：`SJTU.Canvas.Helper_3.0.13_x64_portable.zip`
+   - 也可选择免安装便携版：`SJTU.Canvas.Helper_3.0.14_x64_portable.zip`
 
 3. **MacOS 系统**：
    - 下载对应版本安装包 
@@ -51,9 +51,11 @@ SJTU Canvas 小帮手基于 [Tauri](https://tauri.app/) 开发，助您更便捷
 
 ### 首次配置
 
-安装完成后，请前往设置页面填写您的 `Canvas Token` 以及文件下载保存目录。
+安装完成后，前往 **系统设置 → 账号与连接**，选择账号类型，点击 **获取 Canvas Token** 查看创建步骤并打开对应的 Canvas 页面。将生成的 Token 填回输入框，设置下载保存目录，可点击 **测试 Canvas Token** 确认连接，完成后点击 **保存全部设置**。视频等功能所需的额外扫码登录也在此分类完成。
 
-![](./images/settings.png)
+主题和主色调位于 **界面偏好**，模型服务与课堂总结配置位于 **AI 与模型**，MCP、Debug 和实验性功能位于 **高级与实验**。切换分类会保留当前修改，**保存全部设置** 会保存各分类的修改。
+
+![系统设置中的账号与连接分类](./images/settings.png)
 
 ## 致谢
 
@@ -70,7 +72,7 @@ SJTU Canvas 小帮手基于 [Tauri](https://tauri.app/) 开发，助您更便捷
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/pangbo13"><img src="https://avatars.githubusercontent.com/u/51732678?v=4?s=100" width="100px;" alt="PangBo"/><br /><sub><b>PangBo</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=pangbo13" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wytili"><img src="https://avatars.githubusercontent.com/u/61528682?v=4?s=100" width="100px;" alt="Yiting Wang"/><br /><sub><b>Yiting Wang</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=wytili" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://blog.a-stable.com"><img src="https://avatars.githubusercontent.com/u/66514911?v=4?s=100" width="100px;" alt="Yuxuan Sun"/><br /><sub><b>Yuxuan Sun</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=definfo" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/yingyx"><img src="https://avatars.githubusercontent.com/u/191231288?v=4?s=100" width="100px;" alt="Yuxuan Ying"/><br /><sub><b>Yuxuan Ying</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=yingyx" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/yingyx"><img src="https://avatars.githubusercontent.com/u/191231288?v=4?s=100" width="100px;" alt="Yuxuan Ying"/><br /><sub><b>Yuxuan Ying</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=yingyx" title="Code">💻</a><a href="#maintenance-yingyx" title="Maintenance">🚧</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://young-lord.github.io"><img src="https://avatars.githubusercontent.com/u/51789698?v=4?s=100" width="100px;" alt="LY"/><br /><sub><b>LY</b></sub></a><br /><a href="https://github.com/Okabe-Rintarou-0/SJTU-Canvas-Helper/commits?author=young-lord" title="Code">💻</a></td>
     </tr>
   </tbody>

@@ -205,7 +205,7 @@ export default function DiscussionsPage() {
       })) as FullDiscussion;
       setFullDiscussion(nextFullDiscussion);
     } catch (error) {
-      consoleLog(LOG_LEVEL_ERROR, error);
+      consoleLog(LOG_LEVEL_ERROR, "Discussion content loading failed");
       messageApi.error(`获取讨论内容失败：${error}`);
     }
   };
@@ -236,7 +236,7 @@ export default function DiscussionsPage() {
               }}
             >
               <CourseSelect
-                onChange={(courseId) => setSelectedCourseId(courseId)}
+                onChange={setSelectedCourseId}
                 disabled={operating}
                 courses={courses.data}
                 value={selectedCourseId === -1 ? undefined : selectedCourseId}
