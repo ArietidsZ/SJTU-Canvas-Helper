@@ -2,7 +2,7 @@
 //! detached session tasks. Stopping does not revoke already-sent remote work.
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
-use axum::{response::Json, Router};
+use axum::{middleware, response::Json, Router};
 use rmcp::{
     model::{ClientNotification, ClientRequest, ServerInfo, ServerResult},
     service::{NotificationContext, RequestContext},
@@ -15,7 +15,7 @@ use rmcp::{
 use tokio::{sync::RwLock, task::JoinHandle, time::timeout};
 use tokio_util::sync::CancellationToken;
 
-use super::McpServer;
+use super::{http_boundary, McpServer};
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -72,6 +72,7 @@ impl Service<RoleServer> for CancellableServer {
 }
 
 pub(crate) struct McpRuntime {
+    bound_port: u16,
     cancellation: CancellationToken,
     handlers: Arc<RwLock<()>>,
     sessions: Arc<LocalSessionManager>,
@@ -79,6 +80,18 @@ pub(crate) struct McpRuntime {
 }
 
 impl McpRuntime {
+    /// A task-lifetime observation, not a health probe or authentication check.
+    pub(crate) fn status(&self) -> (super::status::McpState, Option<u16>) {
+        use super::status::McpState;
+        if !self.root.as_ref().is_some_and(|root| !root.is_finished()) {
+            (McpState::Exited, None)
+        } else if self.cancellation.is_cancelled() {
+            (McpState::Stopping, None)
+        } else {
+            (McpState::Running, Some(self.bound_port))
+        }
+    }
+
     pub(crate) fn is_running(&self) -> bool {
         !self.cancellation.is_cancelled() && self.root.as_ref().is_some_and(|root| !root.is_finished())
     }
@@ -133,34 +146,22 @@ impl Drop for McpRuntime {
 }
 
 pub(crate) async fn start_mcp_server(port: u16) -> io::Result<McpRuntime> {
+    start_with_policy(port, false).await
+}
+
+pub(crate) async fn start_headless_mcp_server(port: u16) -> io::Result<McpRuntime> {
+    start_with_policy(port, true).await
+}
+
+async fn start_with_policy(port: u16, headless: bool) -> io::Result<McpRuntime> {
     // Bind before publishing a running instance; bind errors are synchronous
     // results, not panics hidden inside an already-stored JoinHandle.
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?;
+    let bound_port = listener.local_addr()?.port();
     let cancellation = CancellationToken::new();
     let handlers = Arc::new(RwLock::new(()));
     let sessions = Arc::new(LocalSessionManager::default());
-    let factory_token = cancellation.clone();
-    let factory_handlers = handlers.clone();
-    let service = StreamableHttpService::new(
-        move || {
-            if factory_token.is_cancelled() {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "MCP server is stopping"));
-            }
-            Ok(CancellableServer {
-                inner: McpServer,
-                cancellation: factory_token.clone(),
-                handlers: factory_handlers.clone(),
-            })
-        },
-        sessions.clone(),
-        StreamableHttpServerConfig::default()
-            .with_sse_keep_alive(Some(Duration::from_secs(15)))
-            .with_stateful_mode(true)
-            .with_cancellation_token(cancellation.child_token()),
-    );
-    let router = Router::new()
-        .route("/health", axum::routing::get(|| async { Json(serde_json::json!({"status": "ok"})) }))
-        .fallback_service(service);
+    let router = mcp_router_with_policy(bound_port, &cancellation, &handlers, &sessions, headless);
     let shutdown = cancellation.clone();
     // Capture the guard before spawning, including abort-before-first-poll.
     let guard = cancellation.clone().drop_guard();
@@ -170,5 +171,67 @@ pub(crate) async fn start_mcp_server(port: u16) -> io::Result<McpRuntime> {
             .with_graceful_shutdown(async move { shutdown.cancelled().await })
             .await
     });
-    Ok(McpRuntime { cancellation, handlers, sessions, root: Some(root) })
+    Ok(McpRuntime { bound_port, cancellation, handlers, sessions, root: Some(root) })
 }
+
+// Shared by the listener and local HTTP boundary tests. No application work is
+// performed until the existing CancellableServer admits a protocol request.
+#[cfg(test)]
+pub(super) fn mcp_router(
+    port: u16,
+    cancellation: &CancellationToken,
+    handlers: &Arc<RwLock<()>>,
+    sessions: &Arc<LocalSessionManager>,
+) -> Router {
+    mcp_router_with_policy(port, cancellation, handlers, sessions, false)
+}
+
+fn mcp_router_with_policy(
+    port: u16,
+    cancellation: &CancellationToken,
+    handlers: &Arc<RwLock<()>>,
+    sessions: &Arc<LocalSessionManager>,
+    headless: bool,
+) -> Router {
+    let factory_token = cancellation.clone();
+    let factory_handlers = handlers.clone();
+    let service = StreamableHttpService::new(
+        move || {
+            if factory_token.is_cancelled() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "MCP server is stopping"));
+            }
+            Ok(CancellableServer {
+                inner: McpServer { headless },
+                cancellation: factory_token.clone(),
+                handlers: factory_handlers.clone(),
+            })
+        },
+        sessions.clone(),
+        StreamableHttpServerConfig::default()
+            .with_allowed_hosts([format!("127.0.0.1:{port}"), format!("localhost:{port}")])
+            .with_allowed_origins([
+                format!("http://127.0.0.1:{port}"),
+                format!("http://localhost:{port}"),
+            ])
+            .with_sse_keep_alive(Some(Duration::from_secs(15)))
+            .with_stateful_mode(true)
+            .with_cancellation_token(cancellation.child_token()),
+    );
+    Router::new()
+        .route("/health", axum::routing::get(|| async { Json(serde_json::json!({"status": "ok"})) }))
+        .fallback_service(service)
+        .layer(middleware::from_fn(http_boundary::limit_body))
+        // Last layer is outermost: cancellation also interrupts body buffering.
+        .layer(middleware::from_fn_with_state(
+            cancellation.clone(),
+            http_boundary::reject_cancelled,
+        ))
+}
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "status_runtime_tests.rs"]
+mod status_tests;

@@ -41,6 +41,7 @@ pub struct App {
     config_owner: tokio::sync::Mutex<Option<String>>,
     handle: RwLock<Option<JoinHandle<()>>>,
     mcp_handle: tokio::sync::Mutex<Option<crate::mcp::McpRuntime>>,
+    mcp_headless: std::sync::OnceLock<crate::mcp::cli::HeadlessOptions>,
     cache: Cache,
 }
 

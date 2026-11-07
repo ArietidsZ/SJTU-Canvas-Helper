@@ -972,6 +972,7 @@ impl App {
             ),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         }
     }
@@ -1155,6 +1156,60 @@ impl App {
         *handle = None;
     }
 
+    /// Set a process-only headless policy before the first listener starts.
+    /// Never merge CLI overrides into the persisted application configuration.
+    pub(crate) async fn configure_headless_mcp(
+        &self,
+        options: crate::mcp::cli::HeadlessOptions,
+    ) -> Result<u16> {
+        let owner = self.config_owner.lock().await;
+        self.store_ready()?;
+        owner.as_ref().ok_or(AppError::StaleConfigOwner)?;
+        let slot = self.mcp_handle.lock().await;
+        if slot.is_some() || self.mcp_headless.get().is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "Headless MCP options must be set once, before starting MCP",
+            ).into());
+        }
+        let port = options.effective_port(self.config.read().await.mcp_port)?;
+        self.mcp_headless.set(options).map_err(|_| std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists, "Headless MCP options already set",
+        ))?;
+        Ok(port)
+    }
+
+    /// Read a coherent saved-config/runtime snapshot for the requesting owner.
+    /// This does not start a listener, probe the network, or expose credentials.
+    pub(crate) async fn get_mcp_status(
+        &self,
+        expected_owner: &str,
+    ) -> Result<crate::mcp::status::McpStatus> {
+        let owner = self.config_owner.lock().await;
+        self.store_ready()?;
+        if owner.as_deref() != Some(expected_owner) {
+            return Err(AppError::StaleConfigOwner);
+        }
+        // Match startup lock order: owner -> runtime -> saved configuration.
+        let slot = self.mcp_handle.lock().await;
+        let config = self.config.read().await;
+        let (state, listening_port) = slot.as_ref()
+            .map(crate::mcp::McpRuntime::status)
+            .unwrap_or((crate::mcp::status::McpState::Stopped, None));
+        Ok(crate::mcp::status::McpStatus {
+            state,
+            configured_enabled: config.mcp_enabled,
+            configured_port: config.mcp_port,
+            listening_port,
+            headless: self.mcp_headless.get().is_some(),
+        })
+    }
+
+    pub(crate) async fn mcp_is_running(&self) -> bool {
+        self.mcp_handle.lock().await.as_ref()
+            .is_some_and(crate::mcp::McpRuntime::is_running)
+    }
+
     pub async fn start_mcp(&self) -> Result<bool> {
         let owner = self.config_owner.lock().await;
         self.store_ready()?;
@@ -1177,8 +1232,16 @@ impl App {
             return Ok(true);
         }
         Self::stop_mcp_slot(slot).await?;
-        let port = self.config.read().await.mcp_port;
-        let runtime = crate::mcp::start_mcp_server(port).await?;
+        let saved_port = self.config.read().await.mcp_port;
+        let port = match self.mcp_headless.get() {
+            Some(options) => options.effective_port(saved_port)?,
+            None => saved_port,
+        };
+        let runtime = if self.mcp_headless.get().is_some() {
+            crate::mcp::start_headless_mcp_server(port).await?
+        } else {
+            crate::mcp::start_mcp_server(port).await?
+        };
         *slot = Some(runtime);
         tracing::info!("MCP listener bound on port {port}");
         Ok(true)
@@ -2207,6 +2270,49 @@ impl App {
         self.client.explain_file(file).await
     }
 
+    /// Resolve IDs against fresh Canvas metadata. MCP callers never supply a URL
+    /// or a serialized File, and the existing GUI explanation path is unchanged.
+    pub(crate) async fn explain_file_for_mcp(&self, course_id: i64, file_id: i64) -> Result<String> {
+        let failure = |message: &str| AppError::LLMError(message.to_owned());
+        if self.mcp_headless.get().is_some() {
+            return Err(failure("AI tools are disabled in headless MCP mode"));
+        }
+        if course_id <= 0 || file_id <= 0 {
+            return Err(failure("MCP course and file IDs must be positive"));
+        }
+        let (expected_owner, token, client, admission) = {
+            // Capture immutable Canvas origin/token and the original LLM state
+            // together. No network operation holds this owner lock.
+            let owner = self.config_owner.lock().await;
+            self.store_ready()?;
+            let expected_owner = owner.as_ref().ok_or(AppError::StaleConfigOwner)?.clone();
+            // Reject excess MCP file work before metadata or download, after
+            // validating the store/owner. Admission never waits or queues.
+            let admission = crate::client::ai::McpFileAdmission::try_acquire()?;
+            let config = self.config.read().await;
+            let client = self.client.canvas_read_snapshot(Self::get_base_url(&config.account_type));
+            client.restore_llm_snapshot(self.client.llm_state_snapshot().await).await;
+            (expected_owner, config.token.clone(), client, admission)
+        };
+        let files = tokio::time::timeout(
+            Duration::from_secs(30),
+            client.list_course_files(course_id, &token),
+        )
+        .await
+        .map_err(|_| failure("MCP file metadata lookup timed out"))?
+        .map_err(|_| failure("MCP file metadata lookup failed"))?;
+        self.ensure_config_owner(&expected_owner).await?;
+        let file = files.into_iter().find(|file| file.id == file_id)
+            .ok_or_else(|| failure("MCP file is not available in this course"))?;
+        let result = client.explain_file_for_mcp(
+            &file,
+            admission,
+            self.ensure_config_owner(&expected_owner),
+        ).await;
+        self.ensure_config_owner(&expected_owner).await?;
+        result
+    }
+
     pub async fn chat_with_file(&self, file: &File, messages: &[LLMChatMessage]) -> Result<String> {
         self.client.chat_with_file(file, messages).await
     }
@@ -2730,6 +2836,7 @@ mod live_proxy_tests {
             }),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         }
     }
@@ -2866,6 +2973,7 @@ mod live_proxy_tests {
             config_owner: tokio::sync::Mutex::new(Some(uuid::Uuid::new_v4().to_string())),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         };
         assert!(app.store_ready().is_ok());
@@ -2911,6 +3019,7 @@ mod tests {
             }),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         }
     }
@@ -2980,3 +3089,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_headless_tests.rs"]
+mod mcp_headless_tests;

@@ -1338,6 +1338,11 @@ async fn list_external_module_items(course_id: i64) -> Result<Vec<ModuleItem>> {
 }
 
 #[tauri::command]
+async fn get_mcp_status(expected_owner: String) -> Result<mcp::status::McpStatus> {
+    APP.get_mcp_status(&expected_owner).await
+}
+
+#[tauri::command]
 async fn start_mcp_server() -> Result<bool> {
     APP.start_mcp().await
 }
@@ -1347,8 +1352,22 @@ async fn stop_mcp_server() -> Result<()> {
     APP.stop_mcp().await
 }
 
+fn main() -> Result<()> {
+    // Parse before diagnostics, APP construction/recovery, or Tauri setup.
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if mcp::cli::help_requested(&args) {
+        print!("{}", mcp::cli::HELP);
+        return Ok(());
+    }
+    let options = mcp::cli::HeadlessOptions::parse(args)?;
+    if let Some(options) = options {
+        return mcp::headless::run(options);
+    }
+    gui_main()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn gui_main() -> Result<()> {
     let log_directory = App::config_dir()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir().join("SJTU-Canvas-Helper"));
@@ -1497,6 +1516,7 @@ async fn main() -> Result<()> {
             start_subtitle_chat_stream,
             summarize_subtitle,
             // MCP server
+            get_mcp_status,
             start_mcp_server,
             stop_mcp_server
         ])

@@ -73,6 +73,9 @@ pub struct File {
     pub url: String,
     pub size: u64,
     pub locked: bool,
+    /// None means the server did not provide its per-user access decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_for_user: Option<bool>,
     #[serde(default)]
     pub mime_class: String,
     #[serde(default, rename = "content-type")]

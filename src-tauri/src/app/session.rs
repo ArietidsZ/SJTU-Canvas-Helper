@@ -265,6 +265,7 @@ mod tests {
             config_owner: Mutex::new(Some(uuid::Uuid::new_v4().to_string())),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         });
         (directory, app)

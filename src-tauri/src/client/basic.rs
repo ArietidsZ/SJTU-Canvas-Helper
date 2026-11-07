@@ -689,19 +689,11 @@ impl Client {
         start_date: &str,
         end_date: &str,
     ) -> Result<Vec<CalendarEvent>> {
-        let context_codes = context_codes
-            .iter()
-            .map(|context_code| format!("context_codes[]={context_code}"))
-            .reduce(|c1, c2| format!("{c1}&{c2}"))
-            .unwrap_or_default();
-        let url = format!(
-            "{}/api/v1/calendar_events?type=assignment&{}&start_date={}&end_date={}",
-            self.base_url.read().await,
-            context_codes,
-            start_date,
-            end_date
-        );
-        self.list_items(&url, token).await
+        let base_url = self.base_url.read().await.clone();
+        let url = super::calendar_query::calendar_events_url(
+            &self.cli, &base_url, context_codes, start_date, end_date,
+        )?;
+        self.list_items(url.as_str(), token).await
     }
 
     pub async fn list_calendar_events(

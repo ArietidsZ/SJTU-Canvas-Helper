@@ -6,6 +6,25 @@ use crate::{
 };
 use std::path::Path;
 
+/// Non-queuing MCP file-work admission. Keep ownership through parsing/model use;
+/// an abandoned blocking parser must continue to hold its slot until it exits.
+/// This bounds admitted requests, not allocations inside metadata or parsers.
+pub(crate) struct McpFileAdmission {
+    _permit: tokio::sync::SemaphorePermit<'static>,
+}
+
+impl McpFileAdmission {
+    pub(crate) fn try_acquire() -> Result<Self> {
+        static FILE_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        FILE_SLOT
+            .try_acquire()
+            .map(|permit| Self { _permit: permit })
+            .map_err(|_| crate::error::AppError::LLMError(
+                "MCP file explanation is busy; try again later".to_owned(),
+            ))
+    }
+}
+
 impl Client {
     pub async fn chat<S: Into<String>>(&self, prompt: S) -> Result<String> {
         self.llm_cli.chat(prompt.into()).await
@@ -74,6 +93,70 @@ impl Client {
             content: Self::default_file_summary_request(&file.display_name),
         }];
         self.chat_with_file(file, &messages).await
+    }
+
+    /// MCP-only entry point. `file` must be freshly read from Canvas by App.
+    /// The caller supplies an owner check that is polled after parsing and before
+    /// model use. It is not an atomic revocation of an already issued request.
+    pub(crate) async fn explain_file_for_mcp(
+        &self,
+        file: &File,
+        admission: McpFileAdmission,
+        before_model: impl std::future::Future<Output = Result<()>>,
+    ) -> Result<String> {
+        use super::mcp_download;
+        use crate::error::AppError;
+        let failure = |message: &str| AppError::LLMError(message.to_owned());
+        let extension = mcp_download::validate_metadata(
+            file.locked,
+            file.locked_for_user,
+            file.size,
+            file.external_type.is_some(),
+            &file.display_name,
+        )
+        .map_err(|error| failure(&error.to_string()))?;
+        let data = mcp_download::download(&file.url, file.size)
+            .await
+            .map_err(|error| failure(&error.to_string()))?;
+
+        // Existing PDF/DOCX parsers do synchronous CPU work. Keep it off Tokio
+        // workers and bound waiting, with one parser slot retained by the worker
+        // even if this request is cancelled or times out. This is not a sandbox:
+        // a running spawn_blocking parser cannot be killed by dropping its handle.
+        static PARSER_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let (text, _admission) = tokio::time::timeout(std::time::Duration::from_secs(15), async move {
+            let permit = PARSER_SLOT
+                .acquire()
+                .await
+                .map_err(|_| failure("MCP file parser is unavailable"))?;
+            let runtime = tokio::runtime::Handle::current();
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let text = runtime.block_on(
+                    super::file_parser::new_generic_file_reader().parse(data.into(), &extension),
+                ).map_err(|_| ())?;
+                // Return admission with the text so model work stays bounded.
+                // If the caller left, the worker/output retains it until done.
+                Ok::<_, ()>((text, admission))
+            })
+            .await
+            .map_err(|_| failure("MCP file parsing failed"))?
+            .map_err(|_| failure("MCP file parsing failed"))
+        })
+        .await
+        .map_err(|_| failure("MCP file parsing timed out"))??;
+        mcp_download::validate_text(&text).map_err(|error| failure(&error.to_string()))?;
+        before_model.await?;
+        let messages = [LLMChatMessage {
+            role: "user".to_owned(),
+            content: Self::default_file_summary_request(&file.display_name),
+        }];
+        // App uses an isolated client with a frozen copy of the original LLM
+        // state, never a subsequently configured account/provider.
+        self.llm_cli
+            .chat(self.build_file_chat_prompt(file, &text, &messages))
+            .await
+            .map_err(|_| failure("MCP file explanation failed"))
     }
 
     pub fn compress_subtitle(&self, subtitle: &[CanvasVideoSubTitle]) -> Result<String> {
@@ -174,5 +257,53 @@ impl Client {
             content: Self::default_subtitle_summary_request(),
         }];
         self.chat_with_subtitle(canvas_course_id, &messages).await
+    }
+}
+
+#[cfg(test)]
+mod mcp_file_tests {
+    use super::*;
+
+    // Both tests touch the process-wide admission slot.
+    static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn mcp_file_admission_is_non_queuing_and_reusable() {
+        let _test_guard = TEST_LOCK.lock().await;
+        let admission = McpFileAdmission::try_acquire().unwrap();
+        let error = McpFileAdmission::try_acquire().err().expect("second request must be busy");
+        assert!(error.to_string().contains("busy"));
+        drop(admission);
+        assert!(McpFileAdmission::try_acquire().is_ok());
+    }
+
+
+    #[tokio::test]
+    async fn untrusted_files_fail_before_parser_owner_guard_or_model() {
+        let _test_guard = TEST_LOCK.lock().await;
+        let client = Client::new_without_proxy("https://oc.sjtu.edu.cn", "", "", "", None);
+        let metadata = File {
+            display_name: "file.pdf".to_owned(),
+            url: "https://oc.sjtu.edu.cn/files/1/download".to_owned(),
+            locked_for_user: Some(false),
+            size: 4,
+            ..Default::default()
+        };
+        for file in [
+            File { locked: true, ..metadata.clone() },
+            File { locked_for_user: None, ..metadata.clone() },
+            File { locked_for_user: Some(true), ..metadata.clone() },
+            File { size: super::super::mcp_download::MAX_BYTES as u64 + 1, ..metadata.clone() },
+            File { url: "file:///tmp/private.pdf".to_owned(), ..metadata.clone() },
+            File { url: "https://evil.test/file?token=secret".to_owned(), ..metadata.clone() },
+            File { external_type: Some("File".to_owned()), ..metadata },
+        ] {
+            let error = client.explain_file_for_mcp(&file, McpFileAdmission::try_acquire().unwrap(), async {
+                panic!("rejected metadata must not reach the pre-model owner guard")
+            }).await.unwrap_err().to_string();
+            assert!(!error.contains("secret"));
+            assert!(!error.contains("https://"));
+            assert!(!error.contains("/tmp/private"));
+        }
     }
 }

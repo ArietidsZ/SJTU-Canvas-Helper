@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PropsWithChildren } from "react";
 import SettingsPage from "../../page/settings";
 import type { AppConfig } from "../../lib/model";
+import type { McpStatus } from "../../lib/mcp_status";
 import { ConfigReadFailure, StaleConfigSessionError } from "../../lib/config";
 import { currentSession, invalidateSession } from "../../lib/session";
 import { MemoryRouter } from "react-router-dom";
@@ -75,6 +76,7 @@ beforeEach(() => {
     if (command === "list_accounts") return ["Default", "Study"];
     if (command === "read_account_info") return { current_account: "Default" };
     if (command === "check_extra_login_status") return true;
+    if (command === "get_mcp_status") return runtimeStatus({ configured_enabled: config.mcp_enabled, configured_port: config.mcp_port });
     if (command === "get_raw_config") return JSON.stringify({ theme: "light" });
     if (command === "test_token") return { name: "测试用户" };
     if (command === "downloaded_files") return { directory: config.save_path, files: [], totalBytes: 0, warnings: [], busy: false };
@@ -318,8 +320,8 @@ it("retains MCP settings, raw config preview and diagnostic tools", async () => 
   fireEvent.click(screen.getByRole("switch", { name: "启用 MCP Server" }));
   fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "3200" } });
   const connectionText = (screen.getByLabelText("MCP 连接配置") as HTMLTextAreaElement).value;
-  expect(connectionText).toContain('"type": "streamable-http"');
-  expect(connectionText).toContain("http://localhost:3200");
+  expect(connectionText).toContain('"type": "remote"');
+  expect(connectionText).toContain("http://127.0.0.1:3200/mcp");
   fireEvent.click(screen.getByRole("button", { name: "复制配置" }));
   expect(mocks.writeClipboard).toHaveBeenCalledWith(connectionText);
   fireEvent.click(screen.getByRole("switch", { name: "启用 Debug 模式" })); save();
@@ -684,4 +686,186 @@ it("reports a current debug autosave failure even when the save invalidates the 
   fireEvent.click(screen.getByRole("switch", { name: "启用 Debug 模式" }));
   await waitFor(() => expect(mocks.message.error).toHaveBeenCalledWith("保存失败：Error: current debug save failed"));
   expect(mocks.message.success).not.toHaveBeenCalled();
+});
+
+function runtimeStatus(overrides: Partial<McpStatus> = {}): McpStatus {
+  return { state: "stopped", configured_enabled: false, configured_port: 3100,
+    listening_port: null, headless: false, ...overrides };
+}
+
+it("keeps saved MCP status separate from the draft guide and refreshes after saving", async () => {
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("已保存设置：已禁用 · 端口 3100");
+  expect(mocks.invoke).toHaveBeenCalledWith("get_mcp_status", { expectedOwner: "owner:Default:0" });
+  const reads = mocks.invoke.mock.calls.filter(([command]) => command === "get_mcp_status").length;
+  fireEvent.click(screen.getByRole("switch", { name: "启用 MCP Server" }));
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "3200" } });
+  expect((screen.getByLabelText("MCP 连接配置") as HTMLTextAreaElement).value).toContain("http://127.0.0.1:3200/mcp");
+  expect(screen.getByText("已保存设置：已禁用 · 端口 3100")).toBeVisible();
+  expect(mocks.invoke.mock.calls.filter(([command]) => command === "get_mcp_status")).toHaveLength(reads);
+  save();
+  await screen.findByText("已保存设置：已启用 · 端口 3200");
+  expect(mocks.invoke).toHaveBeenCalledWith("get_mcp_status", { expectedOwner: "owner:Default:0:saved" });
+  // Saved enablement is not used to infer a running listener.
+  expect(screen.getByText("运行状态：未运行")).toBeVisible();
+});
+
+it.each([
+  ["running", "运行中（监听任务）", 4310], ["stopped", "未运行", null],
+  ["stopping", "正在停止", null], ["exited", "监听任务已退出", null],
+] as const)("renders the %s backend snapshot without deriving its state from draft settings", async (state, label, listeningPort) => {
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status"
+    ? Promise.resolve(runtimeStatus({ state, listening_port: listeningPort, headless: true })) : base(command, args));
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText(`运行状态：${label}`);
+  expect(screen.getByText("已保存设置：已禁用 · 端口 3100")).toBeVisible();
+  expect(screen.getByText(`监听地址（快照）：${listeningPort ? "http://127.0.0.1:4310/mcp" : "无"}`)).toBeVisible();
+  expect(screen.getByText("运行模式：无界面")).toBeVisible();
+  expect(screen.getByText(/不是网络可达性或身份鉴权测试/)).toBeVisible();
+});
+
+it.each(["resolve", "reject"])("keeps only the latest overlapping MCP refresh when the old read will %s", async outcome => {
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("运行状态：未运行");
+  const older = deferred<McpStatus>(); const newer = deferred<McpStatus>();
+  const base = mocks.invoke.getMockImplementation()!;
+  let reads = 0;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status"
+    ? (++reads === 1 ? older.promise : newer.promise) : base(command, args));
+  const refresh = screen.getByRole("button", { name: "刷新 MCP 状态" });
+  fireEvent.click(refresh); fireEvent.click(refresh);
+  expect(screen.queryByText("运行状态：未运行")).not.toBeInTheDocument();
+  await act(async () => newer.resolve(runtimeStatus({ state: "running", listening_port: 5321 })));
+  await screen.findByText("监听地址（快照）：http://127.0.0.1:5321/mcp");
+  await act(async () => {
+    if (outcome === "resolve") older.resolve(runtimeStatus({ state: "exited" }));
+    else older.reject(new Error("PRIVATE_OLD_NATIVE_ERROR"));
+  });
+  expect(screen.getByText("监听地址（快照）：http://127.0.0.1:5321/mcp")).toBeVisible();
+  expect(screen.queryByText(/PRIVATE_OLD_NATIVE_ERROR|无法读取 MCP 状态|监听任务已退出/)).not.toBeInTheDocument();
+});
+
+it("refreshes the saved MCP owner after an inline save without replacing newer drafts", async () => {
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("已保存设置：已禁用 · 端口 3100");
+  fireEvent.click(screen.getByRole("switch", { name: "启用 MCP Server" }));
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "3201" } });
+  fireEvent.click(screen.getByRole("switch", { name: "启用 Debug 模式" }));
+  await screen.findByText("已保存设置：已启用 · 端口 3201");
+  expect(mocks.invoke).toHaveBeenCalledWith("get_mcp_status", { expectedOwner: "owner:Default:0:saved" });
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "3202" } });
+  expect(screen.getByText("已保存设置：已启用 · 端口 3201")).toBeVisible();
+});
+
+it.each(["resolve", "reject"])("removes an MCP observation on session invalidation and drops its late %s", async outcome => {
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("运行状态：未运行");
+  const pending = deferred<McpStatus>();
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status" ? pending.promise : base(command, args));
+  fireEvent.click(screen.getByRole("button", { name: "刷新 MCP 状态" }));
+  act(() => invalidateSession());
+  expect(screen.getByText("当前配置会话已失效，请重新加载设置后刷新。")).toBeVisible();
+  expect(screen.getByRole("button", { name: "刷新 MCP 状态" })).toBeDisabled();
+  await act(async () => {
+    if (outcome === "resolve") pending.resolve(runtimeStatus({ state: "running", listening_port: 6432 }));
+    else pending.reject(new Error("PRIVATE_OLD_NATIVE_ERROR"));
+  });
+  expect(screen.queryByText(/6432|PRIVATE_OLD_NATIVE_ERROR|无法读取 MCP 状态/)).not.toBeInTheDocument();
+});
+
+it("does not publish an old-owner MCP read after a save publishes the successor", async () => {
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("运行状态：未运行");
+  const pending = deferred<McpStatus>();
+  const base = mocks.invoke.getMockImplementation()!;
+  let reads = 0;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status" && ++reads === 1
+    ? pending.promise : base(command, args));
+  fireEvent.click(screen.getByRole("button", { name: "刷新 MCP 状态" }));
+  fireEvent.click(screen.getByRole("switch", { name: "启用 MCP Server" }));
+  fireEvent.change(screen.getByLabelText("MCP 端口"), { target: { value: "3200" } });
+  save();
+  await screen.findByText("已保存设置：已启用 · 端口 3200");
+  await act(async () => pending.resolve(runtimeStatus({ state: "running", listening_port: 6432 })));
+  expect(screen.getByText("已保存设置：已启用 · 端口 3200")).toBeVisible();
+  expect(screen.queryByText(/6432/)).not.toBeInTheDocument();
+});
+
+it("retries a failed MCP read without exposing its native error or changing settings", async () => {
+  const base = mocks.invoke.getMockImplementation()!;
+  let fail = true;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status" && fail
+    ? Promise.reject(new Error("PRIVATE_NATIVE_ERROR")) : base(command, args));
+  await openSettings();
+  section("高级与实验");
+  await screen.findByText("无法读取 MCP 状态，请刷新重试。");
+  expect(screen.queryByText(/PRIVATE_NATIVE_ERROR/)).not.toBeInTheDocument();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "刷新 MCP 状态" }));
+  await screen.findByText("运行状态：未运行");
+  expect(mocks.saveConfig).not.toHaveBeenCalled();
+  expect(mocks.invoke.mock.calls.every(([command]) => !["start_mcp", "stop_mcp", "test_token"].includes(command))).toBe(true);
+});
+
+it("shows a legacy saved zero port separately from the actual bound address", async () => {
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status"
+    ? Promise.resolve(runtimeStatus({ state: "running", configured_port: 0, listening_port: 4310 })) : base(command, args));
+  await openSettings(); section("高级与实验");
+  await screen.findByText("已保存设置：已禁用 · 端口 0（未指定固定端口）");
+  expect(screen.getByText("监听地址（快照）：http://127.0.0.1:4310/mcp")).toBeVisible();
+});
+
+it("does not turn a malformed MCP result into an apparent running or stopped status", async () => {
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status"
+    ? Promise.resolve({ state: "running", configured_enabled: true }) : base(command, args));
+  await openSettings(); section("高级与实验");
+  await screen.findByText("无法读取 MCP 状态，请刷新重试。");
+  const panel = within(screen.getByRole("region", { name: "MCP 运行状态快照" }));
+  expect(panel.queryByText(/^运行状态：/)).not.toBeInTheDocument();
+  expect(panel.queryByText(/^监听地址/)).not.toBeInTheDocument();
+});
+
+it.each(["resolve", "reject"])("hides a changed-owner MCP view and drops its late %s without a session event", async outcome => {
+  await openSettings(); section("高级与实验");
+  await screen.findByText("运行状态：未运行");
+  const pending = deferred<McpStatus>();
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status" ? pending.promise : base(command, args));
+  fireEvent.click(screen.getByRole("button", { name: "刷新 MCP 状态" }));
+  config = { ...config, __config_owner: "owner:changed-without-session-event" };
+  section("工具与诊断"); section("高级与实验");
+  expect(screen.getByText("当前配置会话已失效，请重新加载设置后刷新。")).toBeVisible();
+  await act(async () => {
+    if (outcome === "resolve") pending.resolve(runtimeStatus({ state: "running", listening_port: 6432 }));
+    else pending.reject(new Error("PRIVATE_OLD_NATIVE_ERROR"));
+  });
+  expect(screen.queryByText(/6432|PRIVATE_OLD_NATIVE_ERROR|无法读取 MCP 状态/)).not.toBeInTheDocument();
+});
+
+it.each(["resolve", "reject"])("drops an MCP %s after unmount without showing errors or starting more reads", async outcome => {
+  const pending = deferred<McpStatus>();
+  const base = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation((command, args) => command === "get_mcp_status" ? pending.promise : base(command, args));
+  const view = render(<MemoryRouter><SettingsPage /></MemoryRouter>);
+  await screen.findByRole("tab", { name: "高级与实验" });
+  await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("get_mcp_status", { expectedOwner: "owner:Default:0" }));
+  view.unmount();
+  const calls = mocks.invoke.mock.calls.length;
+  await act(async () => {
+    if (outcome === "resolve") pending.resolve(runtimeStatus({ state: "running", listening_port: 6432 }));
+    else pending.reject(new Error("PRIVATE_OLD_NATIVE_ERROR"));
+  });
+  expect(mocks.invoke.mock.calls).toHaveLength(calls);
+  expect(mocks.message.error).not.toHaveBeenCalled();
+  expect(mocks.message.warning).not.toHaveBeenCalled();
 });

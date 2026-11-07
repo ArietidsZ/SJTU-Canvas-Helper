@@ -1188,6 +1188,7 @@ mod tests {
             config: Default::default(),
             handle: Default::default(),
             mcp_handle: Default::default(),
+            mcp_headless: Default::default(),
             cache: Default::default(),
         };
         (directory, app)

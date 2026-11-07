@@ -50,6 +50,7 @@ import VideoSummarySettings from "../components/video_summary_settings";
 import { videoSummaryOptions, videoSummaryOptionsError } from "../lib/video_summary_config";
 import SettingsShell, { SettingsPanel, type SettingsSection } from "../components/settings_shell";
 import AppDataSettings from "../components/app_data_settings";
+import McpStatusPanel from "../components/mcp_status_panel";
 import DownloadedFilesSettings from "../components/downloaded_files_settings";
 import { LoginAlert } from "../components/login_alert";
 import { ConfigReadFailure, getConfig, isConfigOwnerCurrent, saveConfig, StaleConfigSessionError, updateConfig } from "../lib/config";
@@ -60,6 +61,7 @@ import {
   normalizeLlmConfigForSettings,
 } from "../lib/llm_config";
 import { useAppMessage } from "../lib/message";
+import { mcpConnectionGuide } from "../lib/mcp_connection";
 import { AccountInfo, AppConfig, User } from "../lib/model";
 import { currentSession, invalidateSession, isSessionCurrent, subscribeSession } from "../lib/session";
 import { savePathValidator } from "../lib/utils";
@@ -285,6 +287,8 @@ export default function SettingsPage() {
   const [tokenTestResult, setTokenTestResult] = useState<{ severity: "success" | "error"; text: string } | null>(null);
   const [showLogModal, setShowLogModal] = useState<boolean>(false);
   const [formData, setFormData] = useState<AppConfig | null>(null);
+  // Separate from drafts and the dirty-check snapshot, including inline saves.
+  const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
   const [initialSnapshot, setInitialSnapshot] = useState<string>("");
   const [createAccountName, setCreateAccountName] = useState<string>("");
   const [showToken, setShowToken] = useState<boolean>(false);
@@ -381,18 +385,7 @@ export default function SettingsPage() {
 
   const mcpConnectionText = useMemo(() => {
     if (!formData?.token) return "// 请先配置 Canvas Token 并保存";
-    const config = { mcpServers: { "sjtu-canvas": {
-      type: "streamable-http",
-      url: `http://localhost:${formData.mcp_port ?? 3100}`,
-    } } };
-    return [
-      "我现在在本机运行了一个 Canvas MCP 服务器。",
-      "请帮我做以下几件事：",
-      "1. 读取下面的 MCP 服务器配置，连接到 MCP Server",
-      "2. 连接成功后，调用 list_courses 工具列出我的所有 Canvas 课程",
-      "3. 检查有无临近截止的作业，并提醒我",
-      "", "MCP 配置如下：", JSON.stringify(config, null, 2),
-    ].join("\n");
+    return mcpConnectionGuide(formData.mcp_port);
   }, [formData?.token, formData?.mcp_port]);
 
   const parsedRawConfig = useMemo(() => {
@@ -425,6 +418,7 @@ export default function SettingsPage() {
   );
 
   const acceptSavedOwner = useCallback((submitted: AppConfig, saved: AppConfig) => {
+    if (isConfigOwnerCurrent(saved)) setSavedConfig(saved);
     setFormData((current) => {
       if (!current || !isConfigOwnerCurrent(saved) || current.__config_owner !== submitted.__config_owner) {
         return current;
@@ -583,6 +577,7 @@ export default function SettingsPage() {
       setAccounts(nextAccounts);
       setCurrentAccount(accountInfo.current_account);
       setFormData(normalizedConfig);
+      setSavedConfig(normalizedConfig);
       setInitialSnapshot(JSON.stringify(normalizedConfig));
       initialSnapshotRef.current = JSON.stringify(normalizedConfig);
       setTokenError("");
@@ -1811,7 +1806,7 @@ export default function SettingsPage() {
                         MCP Server
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        {`MCP（Model Context Protocol）服务器可将 Canvas 数据能力开放给 AI 客户端。开启后默认运行在 localhost:${formData?.mcp_port ?? 3100}。`}
+                        MCP（Model Context Protocol）服务器通过本机 Streamable HTTP 向客户端提供 Canvas 数据能力。请在应用内启用并保存设置，保持应用运行。
                       </Typography>
                       <Box
                         sx={{
@@ -1852,6 +1847,8 @@ export default function SettingsPage() {
                       </Box>
                     </Box>
 
+                    <McpStatusPanel savedConfig={savedConfig} />
+
                     <Box
                       sx={{
                         p: 2,
@@ -1873,7 +1870,7 @@ export default function SettingsPage() {
                             }}>复制配置</Button>
                         </Stack>
                         <Typography variant="caption" color="text.secondary">
-                          粘贴到 opencode / Claude Desktop / Cline 等支持 MCP 的 AI 客户端即可自动接入。MCP 服务器仅监听本机，无需额外鉴权。
+                          以下连接说明按当前表单端口生成，不代表服务已启动或设置已保存。客户端需支持 Streamable HTTP，并按其配置格式手动接入。本机监听不是身份鉴权，同机其他进程也可能访问 Canvas 数据；仅供可信本机环境使用，请勿通过代理公开。
                         </Typography>
                         <TextField size="small"
                           label="MCP 连接配置"
