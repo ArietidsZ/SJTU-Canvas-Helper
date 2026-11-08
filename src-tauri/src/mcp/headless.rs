@@ -173,3 +173,7 @@ mod tests {
         assert!(error.contains("deadline") && error.contains("unconfirmed"));
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "headless_signal_tests.rs"]
+mod signal_tests;

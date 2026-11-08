@@ -216,3 +216,23 @@ async fn slow_post_body_times_out_after_ten_seconds() {
     assert_status(&read_headers(&mut connection, Duration::from_secs(12)).await, 408);
     assert!(started.elapsed() >= Duration::from_secs(9));
 }
+
+#[test]
+fn review_admission_matches_authority_fallback_and_header_precedence() {
+    use axum::http::HeaderValue;
+    let (mut parts, _) = Request::builder()
+        .uri("http://LOCALHOST:3100/mcp").body(Body::empty()).unwrap().into_parts();
+    // Unit-level HTTP/2-style authority coverage; this is not an HTTP/2
+    // end-to-end test. An explicit Host always overrides URI authority.
+    assert!(uses_allowed_loopback_authority(&parts, 3100));
+    parts.headers.insert("host", HeaderValue::from_static("evil.example"));
+    assert!(!uses_allowed_loopback_authority(&parts, 3100));
+    parts.headers.insert("host", HeaderValue::from_bytes(b"\xff").unwrap());
+    assert!(!uses_allowed_loopback_authority(&parts, 3100));
+    parts.headers.remove("host");
+    parts.headers.insert("origin", HeaderValue::from_bytes(b"\xff").unwrap());
+    assert!(!uses_allowed_loopback_authority(&parts, 3100));
+    parts.headers.remove("origin");
+    parts.uri = "/mcp".parse().unwrap();
+    assert!(!uses_allowed_loopback_authority(&parts, 3100));
+}

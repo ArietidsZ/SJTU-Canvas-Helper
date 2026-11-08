@@ -220,7 +220,7 @@ fn mcp_router_with_policy(
     Router::new()
         .route("/health", axum::routing::get(|| async { Json(serde_json::json!({"status": "ok"})) }))
         .fallback_service(service)
-        .layer(middleware::from_fn(http_boundary::limit_body))
+        .layer(middleware::from_fn_with_state(port, http_boundary::limit_body))
         // Last layer is outermost: cancellation also interrupts body buffering.
         .layer(middleware::from_fn_with_state(
             cancellation.clone(),
@@ -235,3 +235,15 @@ mod tests;
 #[cfg(test)]
 #[path = "status_runtime_tests.rs"]
 mod status_tests;
+
+#[cfg(test)]
+#[path = "session_lifecycle_tests.rs"]
+mod session_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "session_admission_tests.rs"]
+mod session_admission_tests;
+
+#[cfg(test)]
+#[path = "session_interruption_tests.rs"]
+mod session_interruption_tests;
